@@ -5,6 +5,10 @@ library(tidyquant)
 library(rvest)
 library(dplyr)
 
+library(randomForest)
+
+# Data cleaning -----------------------------------------------------------
+
 # URL of the Wikipedia page containing the list of S&P 500 companies
 url <- "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
@@ -15,7 +19,7 @@ html_content <- read_html(url)
 top100_symbols <- html_content %>%
   html_nodes("table.wikitable tbody tr td:first-child") %>%
   html_text() %>%
-  head(138) # Select the top 100 symbols
+  head(137) # Select the top 100 symbols
 
 # Convert the symbols to character strings
 top100_symbols <- as.character(top100_symbols)
@@ -23,17 +27,64 @@ top100_symbols <- as.character(top100_symbols)
 # Clean up symbols to remove trailing newline characters
 top100_symbols <- sub("\n", "", top100_symbols)
 
-df <- data.frame(top100_symbols)
-
 # Define the time period yyyy-mm-dd
-start_date <- "2000-01-01"
+start_date <- "1999-01-01"
 end_date <- "2000-12-31"
 
 # Download historical data for the top 100 symbols
-top100_data <- tq_get(top100_symbols, from = start_date, to = end_date, 
+df <- tq_get(top100_symbols, from = start_date, to = end_date, 
                       source = "yahoo")
 
 # Extract unique symbols from the 'Symbol' column in your dataset
-unique_symbols <- unique(top100_data$symbol)
-stocks <- data.frame(ValueColumn = unique_symbols)
+stocks <- data.frame(ValueColumn = unique(df$symbol))
 
+
+rm(url, html_content, start_date, end_date, top100_symbols)
+
+write.csv(df, file = "raw_data.csv", row.names = F)
+
+# Lagged returns ----------------------------------------------------------
+
+df <- df %>% 
+  mutate(returns = diff(close) / lag(close), .by = symbol)
+
+# Remove unwanted variables
+df <- subset(df, select = -c(open, high, low, close, volume, adjusted))
+
+# Remove NA values
+df <- na.omit(df)
+
+# Add lagged returns
+df <- df %>% 
+  mutate(lr_1 = lag(returns, n = 1),
+         lr_2 = lag(returns, n = 2),
+         lr_3 = lag(returns, n = 3),
+         lr_4 = lag(returns, n = 4),
+         lr_5 = lag(returns, n = 5),
+         lr_10 = lag(returns, n = 10),
+         lr_21 = lag(returns, n = 21),
+         lr_42 = lag(returns, n = 42),
+         lr_63 = lag(returns, n = 63),
+         lr_126 = lag(returns, n = 126),
+         lr_252 = lag(returns, n = 252), .by = symbol)
+
+
+# Random forest -----------------------------------------------------------
+
+# We need one year of data
+df <- na.omit(subset(df, date > "1999-12-31"))
+
+# Training set
+train <- sample(1:nrow(df), nrow(df) / 2)
+
+# Random forest
+rf <- randomForest(returns ~ lr_1 + lr_2 + lr_3 + lr_4 + lr_5 + lr_10 + lr_21 + 
+                     lr_42 + lr_63 + lr_126 + lr_252, data = df, ntree = 500, 
+                   subset = train, importance = T)
+
+yhat.rf <- predict(rf , newdata = df[-train, ])
+df_test <- df[-train, "returns"]
+mean((yhat.rf - df_test$returns) ^ 2)
+
+# Variable importance
+varImpPlot(rf)
