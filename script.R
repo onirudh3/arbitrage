@@ -78,6 +78,7 @@ df <- na.omit(subset(df, date > "1999-12-31"))
 train <- sample(1:nrow(df), nrow(df) / 2)
 
 # Random forest
+set.seed(1435289)
 rf <- randomForest(returns ~ lr_1 + lr_2 + lr_3 + lr_4 + lr_5 + lr_10 + lr_21 + 
                      lr_42 + lr_63 + lr_126 + lr_252, data = df, ntree = 500, 
                    subset = train, importance = T)
