@@ -2,6 +2,7 @@
 # Libraries ---------------------------------------------------------------
 
 library(tidyquant)
+library(tidyr)
 library(rvest)
 library(dplyr)
 
@@ -74,18 +75,30 @@ df <- df %>%
 # We need one year of data
 df <- na.omit(subset(df, date > "1999-12-31"))
 
+# Format data to get unique stock-return rows
+spread_data <- df %>%
+  gather(lagged_returns, values, starts_with("lr_")) %>% 
+  unite(lr_month, lagged_returns, date) %>% 
+  spread(lr_month, value)
+
+spread_data <- janitor::clean_names(spread_data)
+
+spread_data$returns <- as.factor(spread_data$returns)
+
 # Training set
-train <- sample(1:nrow(df), nrow(df) / 2)
+train <- sample(1:nrow(spread_data), nrow(spread_data) / 2)
 
 # Random forest
 set.seed(1435289)
-rf <- randomForest(returns ~ lr_1 + lr_2 + lr_3 + lr_4 + lr_5 + lr_10 + lr_21 + 
-                     lr_42 + lr_63 + lr_126 + lr_252, data = df, ntree = 500, 
-                   subset = train, importance = T)
+rf <- randomForest(returns ~ ., data = spread_data, ntree = 500, 
+                   na.action = na.omit, subset = train, importance = T)
 
+# Variable importance
+varImpPlot(rf)
+
+# Classification
+print(rf)
 yhat.rf <- predict(rf , newdata = df[-train, ])
 df_test <- df[-train, "returns"]
 mean((yhat.rf - df_test$returns) ^ 2)
 
-# Variable importance
-varImpPlot(rf)
