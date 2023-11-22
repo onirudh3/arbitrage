@@ -29,8 +29,8 @@ top100_symbols <- as.character(top100_symbols)
 top100_symbols <- sub("\n", "", top100_symbols)
 
 # Define the time period yyyy-mm-dd
-start_date <- "1999-01-01"
-end_date <- "2000-12-31"
+start_date <- "1995-01-01"
+end_date <- "1996-12-31"
 
 # Download historical data for the top 100 symbols
 df <- tq_get(top100_symbols, from = start_date, to = end_date, 
@@ -38,7 +38,6 @@ df <- tq_get(top100_symbols, from = start_date, to = end_date,
 
 # Extract unique symbols from the 'Symbol' column in your dataset
 stocks <- data.frame(ValueColumn = unique(df$symbol))
-
 
 rm(url, html_content, start_date, end_date, top100_symbols)
 
@@ -70,28 +69,38 @@ df <- df %>%
          lr_252 = lag(returns, n = 252), .by = symbol)
 
 
+
+# Market returns ----------------------------------------------------------
+
+df <- df %>% 
+  group_by(date) %>% 
+  mutate(market_return = mean(returns), .after = returns)
+
+df <- df %>% 
+  mutate(returns_greater_than_market = case_when(returns > market_return ~ 1, 
+                                                 T ~ 0), .after = market_return)
+
 # Random forest -----------------------------------------------------------
 
 # We need one year of data
-df <- na.omit(subset(df, date > "1999-12-31"))
-
-# Format data to get unique stock-return rows
-spread_data <- df %>%
-  gather(lagged_returns, values, starts_with("lr_")) %>% 
-  unite(lr_month, lagged_returns, date) %>% 
-  spread(lr_month, value)
-
-spread_data <- janitor::clean_names(spread_data)
-
-spread_data$returns <- as.factor(spread_data$returns)
+df <- na.omit(subset(df, date > "1995-12-31"))
 
 # Training set
-train <- sample(1:nrow(spread_data), nrow(spread_data) / 2)
+train <- sample(1:nrow(df), nrow(df) / 2)
+
+# Make returns_greater_than_market binary 
+df$returns_greater_than_market <- as.factor(df$returns_greater_than_market)
 
 # Random forest
 set.seed(1435289)
-rf <- randomForest(returns ~ ., data = spread_data, ntree = 500, 
+rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
+                     lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+                   data = df, ntree = 500, 
                    na.action = na.omit, subset = train, importance = T)
+
+# Output
+summary(rf)
+print(rf)
 
 # Variable importance
 varImpPlot(rf)
