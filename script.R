@@ -30,7 +30,7 @@ top100_symbols <- sub("\n", "", top100_symbols)
 
 # Define the time period yyyy-mm-dd
 start_date <- "1995-01-01"
-end_date <- "1996-12-31"
+end_date <- "2005-12-31"
 
 # Download historical data for the top 100 symbols
 df <- tq_get(top100_symbols, from = start_date, to = end_date, 
@@ -95,8 +95,8 @@ df$returns_greater_than_market <- as.factor(df$returns_greater_than_market)
 set.seed(1435289)
 rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
                      lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                   data = df, ntree = 500, 
-                   na.action = na.omit, subset = train, importance = T)
+                   data = df, ntree = 500, subset = train,
+                   na.action = na.omit, importance = T)
 
 # Output
 summary(rf)
