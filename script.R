@@ -95,7 +95,7 @@ df$returns_greater_than_market <- as.factor(df$returns_greater_than_market)
 set.seed(1435289)
 rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
                      lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                   data = df, ntree = 500, subset = train,
+                   data = df, ntree = 500, mtry = floor(sqrt(ncol(df)-1)), subset = train,
                    na.action = na.omit, importance = T)
 
 # Output
@@ -111,3 +111,23 @@ yhat.rf <- predict(rf , newdata = df[-train, ])
 df_test <- df[-train, "returns"]
 mean((yhat.rf - df_test$returns) ^ 2)
 
+# A different approach for the training set, in line with the paper: use the first 3 years (1995 and 1996 excluded because of NA/s)
+df$date <- as.Date(df$date, format = "%Y-%m-%d")
+start_date <- as.Date("1997-01-01")
+end_date <- as.Date("1999-12-31")
+train_period <- df[df$date >= start_date & df$date <= end_date, ]
+
+# Random forest with the alternative training sample (1997-1999)
+set.seed(1435289)
+rf_2 <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
+                     lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+                   data = train_period, ntree = 500, mtry = floor(sqrt(ncol(df)-1)),
+                   na.action = na.omit, importance = T)
+summary(rf)
+varImpPlot(rf) 
+print(rf)
+
+# Classification
+df_2 <- df[df$date > end_date, ]
+yhat.rf_2 <- predict(rf_2 , newdata = df_2)
+table(yhat.rf_2, df_2$returns_greater_than_market)
