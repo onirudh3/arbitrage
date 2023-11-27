@@ -1,4 +1,4 @@
-
+rm(list=ls())
 # Libraries ---------------------------------------------------------------
 
 library(tidyquant)
@@ -34,7 +34,8 @@ end_date <- "2005-12-31"
 
 # Download historical data for the top 100 symbols
 df <- tq_get(top100_symbols, from = start_date, to = end_date, 
-                      source = "yahoo")
+             source = "yahoo")
+df$date <- as.Date(df$date, format = "%Y-%m-%d")
 
 # Extract unique symbols from the 'Symbol' column in your dataset
 stocks <- data.frame(ValueColumn = unique(df$symbol))
@@ -46,13 +47,13 @@ write.csv(df, file = "raw_data.csv", row.names = F)
 # Lagged returns ----------------------------------------------------------
 
 df <- df %>% 
-  mutate(returns = diff(close) / lag(close), .by = symbol)
+  mutate(returns = diff(open) / lag(open), .by = symbol)
 
 # Remove unwanted variables
 df <- subset(df, select = -c(open, high, low, close, volume, adjusted))
-
-# Remove NA values
-df <- na.omit(df)
+df <- na.omit(subset(df, date > "1995-12-31"))
+# Clone the dataset to use later in the randomized variable test
+rand_df <- df
 
 # Add lagged returns
 df <- df %>% 
@@ -67,9 +68,9 @@ df <- df %>%
          lr_63 = lag(returns, n = 63),
          lr_126 = lag(returns, n = 126),
          lr_252 = lag(returns, n = 252), .by = symbol)
-
-
-
+na_rows <- apply(is.na(df), 1, any)
+df_na <- df[na_rows,]
+df <- na.omit(subset(df, date > "1995-12-31"))
 # Market returns ----------------------------------------------------------
 
 df <- df %>% 
@@ -82,9 +83,6 @@ df <- df %>%
 
 # Random forest -----------------------------------------------------------
 
-# We need one year of data
-df <- na.omit(subset(df, date > "1995-12-31"))
-
 # Training set
 train <- sample(1:nrow(df), nrow(df) / 2)
 
@@ -95,24 +93,22 @@ df$returns_greater_than_market <- as.factor(df$returns_greater_than_market)
 set.seed(1435289)
 rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
                      lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                   data = df, ntree = 500, mtry = floor(sqrt(ncol(df)-1)), subset = train,
+                   data = df, ntree = 500, subset = train,
                    na.action = na.omit, importance = T)
-
-# Output
 summary(rf)
-print(rf)
-
-# Variable importance
 varImpPlot(rf)
 
-# Classification
+summary(rf)
+varImpPlot(rf)
 print(rf)
+
+# Classification
+
 yhat.rf <- predict(rf , newdata = df[-train, ])
-df_test <- df[-train, "returns"]
-mean((yhat.rf - df_test$returns) ^ 2)
+table(stock_pred, df$returns_greater_than_market[-train])
 
 # A different approach for the training set, in line with the paper: use the first 3 years (1995 and 1996 excluded because of NA/s)
-df$date <- as.Date(df$date, format = "%Y-%m-%d")
+
 start_date <- as.Date("1997-01-01")
 end_date <- as.Date("1999-12-31")
 train_period <- df[df$date >= start_date & df$date <= end_date, ]
@@ -131,3 +127,38 @@ print(rf)
 df_2 <- df[df$date > end_date, ]
 yhat.rf_2 <- predict(rf_2 , newdata = df_2)
 table(yhat.rf_2, df_2$returns_greater_than_market)
+
+
+# Creating a randomized dataset (we only need to randomize the returns variable)
+num_rows <- nrow(rand_df)
+rand_df$returns <- round(runif(num_rows, min = -1, max = 1), 9)
+summary(rand_df$returns)
+summary(df$returns)
+rand_df <- rand_df %>% 
+  mutate(lr_1 = lag(returns, n = 1),
+         lr_2 = lag(returns, n = 2),
+         lr_3 = lag(returns, n = 3),
+         lr_4 = lag(returns, n = 4),
+         lr_5 = lag(returns, n = 5),
+         lr_10 = lag(returns, n = 10),
+         lr_21 = lag(returns, n = 21),
+         lr_42 = lag(returns, n = 42),
+         lr_63 = lag(returns, n = 63),
+         lr_126 = lag(returns, n = 126),
+         lr_252 = lag(returns, n = 252), .by = symbol)
+na_rows_2 <- apply(is.na(df), 1, any)
+rand_df_na <- df[na_rows_2, ]
+rand_df <- na.omit(subset(rand_df, date > "1995-12-31"))
+rand_df <- rand_df %>% 
+  group_by(date) %>% 
+  mutate(market_return = mean(returns), .after = returns)
+rand_df <- rand_df %>% 
+  mutate(returns_greater_than_market = case_when(returns > market_return ~ 1, 
+                                                 T ~ 0), .after = market_return)
+train_period_rand <- rand_df[rand_df$date >= start_date & rand_df$date <= end_date, ]
+
+set.seed(1435289)
+rf_rand <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
+                       lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+                     data = train_period_rand, ntree = 500, mtry = floor(sqrt(ncol(df)-1)),
+                     na.action = na.omit, importance = T)
