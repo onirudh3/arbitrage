@@ -128,6 +128,11 @@ df_test <- df[df$date > end_date, ]
 yhat.rf_2 <- predict(rf_2 , newdata = df_2)
 table(yhat.rf_2, df_2$returns_greater_than_market)
 
+# Modify the threshold (we want more true positives than true negatives)
+predicted_probabilities <- predict(rf_2, newdata = df_test, type = "prob")[, 2]
+new_threshold <- 0.5
+yhat.rf_2_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
+table(yhat.rf_2_thresholded, df_test$returns_greater_than_market)
 
 # Randomized information ---------------------------------------------------
 
@@ -181,3 +186,33 @@ print(rf_rand)
 df_test_rand <- rand_df[rand_df$date > end_date, ]
 yhat.rf_rand <- predict(rf_rand, newdata = df_test_rand)
 table(yhat.rf_rand, df_test_rand$returns_greater_than_market)
+
+# Top 10 stock prediction ---------------------------------------------------
+df <- df %>%
+  group_by(date) %>%  # Group by date
+  arrange(desc(returns)) %>%  # Arrange the data in descending order of returns within each date
+  mutate(rank = row_number(),  # Assign ranks based on order
+         top_10 = as.integer(rank <= 10)) %>%  # Create binary variable for top 10
+  ungroup()
+
+# Create the RF
+set.seed(1435289)
+train_period$top_10 <- as.factor(train_period$top_10)
+rf_3 <- randomForest(top_10 ~ lr_1 + lr_2 + lr_3 + lr_4 + 
+                       lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+                     data = train_period, ntree = 500,
+                     na.action = na.omit, importance = T)
+summary(rf_3)
+varImpPlot(rf_3) 
+print(rf_3)
+
+# Classification
+df_test <- df[df$date > end_date, ]
+yhat.rf_3 <- predict(rf_3 , newdata = df_test)
+table(yhat.rf_3, df_test$returns_greater_than_market)
+
+# Modify the threshold 
+predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
+new_threshold <- 0.5
+yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
+table(yhat.rf_3_thresholded, df_test$top_10)
