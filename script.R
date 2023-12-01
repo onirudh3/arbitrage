@@ -1,12 +1,13 @@
-rm(list=ls())
 # Libraries ---------------------------------------------------------------
 
 library(tidyquant)
 library(tidyr)
 library(rvest)
 library(dplyr)
-
+library(fastDummies) # For creating dummies
 library(randomForest)
+library(caret) # For hyperparameter optimization
+
 
 # Data cleaning -----------------------------------------------------------
 
@@ -42,7 +43,20 @@ stocks <- data.frame(ValueColumn = unique(df$symbol))
 
 rm(url, html_content, start_date, end_date, top100_symbols)
 
+# Write to csv
 write.csv(df, file = "raw_data.csv", row.names = F)
+
+
+# Market returns ----------------------------------------------------------
+
+df <- df %>% 
+  group_by(date) %>% 
+  mutate(market_return = mean(returns), .after = returns)
+
+df <- df %>% 
+  mutate(returns_greater_than_market = case_when(returns > market_return ~ 1, 
+                                                 T ~ 0), .after = market_return)
+
 
 # Lagged returns ----------------------------------------------------------
 
@@ -52,6 +66,7 @@ df <- df %>%
 # Remove unwanted variables
 df <- subset(df, select = -c(open, high, low, close, volume, adjusted))
 df <- na.omit(subset(df, date > "1995-12-31"))
+
 # Clone the dataset to use later in the randomized variable test
 rand_df <- df
 
@@ -71,15 +86,27 @@ df <- df %>%
 na_rows <- apply(is.na(df), 1, any)
 df_na <- df[na_rows,]
 df <- na.omit(subset(df, date > "1995-12-31"))
-# Market returns ----------------------------------------------------------
 
-df <- df %>% 
-  group_by(date) %>% 
-  mutate(market_return = mean(returns), .after = returns)
 
+# Dummies for other variables ---------------------------------------------
+
+# Day of the week
 df <- df %>% 
-  mutate(returns_greater_than_market = case_when(returns > market_return ~ 1, 
-                                                 T ~ 0), .after = market_return)
+  mutate(weekday = wday(date, label = T, abbr = F), .after = date)
+df <- dummy_cols(df, select_columns = "weekday")
+
+# Month of the year
+df <- df %>% 
+  mutate(month = month(date), .after = weekday)
+df <- dummy_cols(df, select_columns = "month")
+
+# Stock dummies
+df <- dummy_cols(df, select_columns = "symbol")
+predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
+new_threshold <- 0.5
+yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
+table(yhat.rf_3_thresholded, df_test$top_10)
+
 
 # Random forest -----------------------------------------------------------
 
@@ -91,23 +118,22 @@ df$returns_greater_than_market <- as.factor(df$returns_greater_than_market)
 
 # Random forest
 set.seed(1435289)
+min_samples <- ceiling(0.0005 * length(train))
+
 rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
                      lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                   data = df, ntree = 500, subset = train,
+                   data = df, ntree = 500, nodesize = min_samples, subset = train,
                    na.action = na.omit, importance = T)
-summary(rf)
-varImpPlot(rf)
-
 summary(rf)
 varImpPlot(rf)
 print(rf)
 
 # Classification
-
 yhat.rf <- predict(rf , newdata = df[-train, ])
-table(stock_pred, df$returns_greater_than_market[-train])
+table(yhat.rf, df$returns_greater_than_market[-train])
 
-# 1997-1999 Training set -----------------------------------------------
+
+# Using 1997-1999 as training set -----------------------------------------
 
 start_date <- as.Date("1997-01-01")
 end_date <- as.Date("1999-12-31")
@@ -115,26 +141,29 @@ train_period <- df[df$date >= start_date & df$date <= end_date, ]
 
 # Random forest with the alternative training sample (1997-1999)
 set.seed(1435289)
+min_samples <- ceiling(0.0005 * nrow(train_period))
 rf_2 <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
-                     lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                   data = train_period, ntree = 500, mtry = floor(sqrt(ncol(df)-1)),
-                   na.action = na.omit, importance = T)
+                       lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+                     data = train_period, ntree = 500, nodesize = min_samples,
+                     na.action = na.omit, importance = T)
 summary(rf_2)
 varImpPlot(rf_2) 
 print(rf_2)
 
 # Classification
 df_test <- df[df$date > end_date, ]
-yhat.rf_2 <- predict(rf_2 , newdata = df_2)
+yhat.rf_2 <- predict(rf_2 , newdata = df_test)
 table(yhat.rf_2, df_2$returns_greater_than_market)
+print(new_way_table)
 
 # Modify the threshold (we want more true positives than true negatives)
 predicted_probabilities <- predict(rf_2, newdata = df_test, type = "prob")[, 2]
-new_threshold <- 0.5
+new_threshold <- 0.6
 yhat.rf_2_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_2_thresholded, df_test$returns_greater_than_market)
 
-# Randomized information ---------------------------------------------------
+
+# Randomized information --------------------------------------------------
 
 # We randomized the results variable
 num_rows <- nrow(rand_df)
@@ -174,9 +203,9 @@ rand_df$returns_greater_than_market <- as.factor(rand_df$returns_greater_than_ma
 train_period_rand <- rand_df[rand_df$date >= start_date & rand_df$date <= end_date, ]
 set.seed(1435289)
 rf_rand <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
-                         lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                       data = train_period_rand, ntree = 500,
-                       na.action = na.omit, importance = T)
+                          lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+                        data = train_period_rand, ntree = 500, nodesize = min_samples,
+                        na.action = na.omit, importance = T)
 
 summary(rf_rand)
 varImpPlot(rf_rand) 
@@ -187,7 +216,35 @@ df_test_rand <- rand_df[rand_df$date > end_date, ]
 yhat.rf_rand <- predict(rf_rand, newdata = df_test_rand)
 table(yhat.rf_rand, df_test_rand$returns_greater_than_market)
 
-# Top 10 stock prediction ---------------------------------------------------
+
+# Hyperparameter optimization ---------------------------------------------
+
+train_control <- trainControl(method = "cv", 
+                              number = 5,
+                              verboseIter = TRUE,
+                              search = "grid"
+)
+hyper_grid <- expand.grid(
+  mtry = c(2, floor(sqrt(ncol(train_period))), 
+           floor(ncol(train_period)/2))
+)
+
+set.seed(1435289)
+rf_grid_search <- train(
+  returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
+    lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
+  data = train_period,
+  method = "rf", 
+  metric = "Accuracy",
+  trControl = train_control, 
+  tuneGrid = hyper_grid,
+  na.action = na.omit,
+  ntree = 500
+)
+print(rf_grid_search)
+
+
+# Top 10 stock prediction -------------------------------------------------
 df <- df %>%
   group_by(date) %>%  # Group by date
   arrange(desc(returns)) %>%  # Arrange the data in descending order of returns within each date
