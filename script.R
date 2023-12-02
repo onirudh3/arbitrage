@@ -69,6 +69,8 @@ df <- df %>%
          lr_63 = lag(returns, n = 63),
          lr_126 = lag(returns, n = 126),
          lr_252 = lag(returns, n = 252), .by = symbol)
+na_rows <- apply(is.na(df), 1, any)
+df_na <- df[na_rows,]
 df <- na.omit(subset(df, date > "1995-12-31"))
 
 # Market returns ----------------------------------------------------------
@@ -103,24 +105,24 @@ train_period <- df[df$date >= start_date & df$date <= end_date, ]
 set.seed(1435289)
 min_samples <- ceiling(0.0005 * nrow(train_period))
 train_period$returns_greater_than_market <- as.factor(train_period$returns_greater_than_market)
-rf_2 <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
+rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
                        lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
                      data = train_period, ntree = 500, nodesize = min_samples,
                      na.action = na.omit, importance = T)
-summary(rf_2)
-varImpPlot(rf_2) 
-print(rf_2)
+summary(rf)
+varImpPlot(rf) 
+print(rf)
 
 # Classification
 df_test <- df[df$date > end_date, ]
-yhat.rf_2 <- predict(rf_2 , newdata = df_test)
-table(yhat.rf_2, df_test$returns_greater_than_market)
+yhat.rf <- predict(rf, newdata = df_test)
+table(yhat.rf, df_test$returns_greater_than_market)
 
 # Modify the threshold (we want more true positives than true negatives)
-predicted_probabilities <- predict(rf_2, newdata = df_test, type = "prob")[, 2]
-new_threshold <- 0.6
-yhat.rf_2_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_2_thresholded, df_test$returns_greater_than_market)
+predicted_probabilities <- predict(rf, newdata = df_test, type = "prob")[, 2]
+new_threshold <- 0.64
+yhat.rf_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
+table(yhat.rf_thresholded, df_test$returns_greater_than_market)
 
 # Random Forest with extra variables ----------------------------------------
 
@@ -144,7 +146,6 @@ summary(rf_dummies)
 varImpPlot(rf_dummies) 
 print(rf_dummies)
 
-# Classification
 yhat.rf_dummies <- predict(rf_dummies, newdata = df_test)
 table(yhat.rf_dummies, df_test$returns_greater_than_market)
 predicted_probabilities <- predict(rf_dummies, newdata = df_test, type = "prob")[, 2]
@@ -190,7 +191,6 @@ summary(rf_id_dummies)
 varImpPlot(rf_id_dummies) 
 print(rf_id_dummies)
 
-# Classification
 yhat.rf_id_dummies <- predict(rf_id_dummies, newdata = df_test)
 table(yhat.rf_id_dummies, df_test$returns_greater_than_market)
 predicted_probabilities <- predict(rf_id_dummies, newdata = df_test, type = "prob")[, 2]
@@ -203,6 +203,8 @@ table(yhat.rf_id_dummies_thresholded, df_test$returns_greater_than_market)
 # We randomized the results variable
 num_rows <- nrow(rand_df)
 rand_df$returns <- round(runif(num_rows, min = -1, max = 1), 9)
+summary(rand_df$returns)
+summary(df$returns)
 
 # With the randomized results variable, we create the lag variables
 rand_df <- rand_df %>% 
@@ -217,6 +219,10 @@ rand_df <- rand_df %>%
          lr_63 = lag(returns, n = 63),
          lr_126 = lag(returns, n = 126),
          lr_252 = lag(returns, n = 252), .by = symbol)
+
+# Just a small check on NAs
+na_rows_2 <- apply(is.na(df), 1, any)
+rand_df_na <- df[na_rows_2, ]
 
 # We delete NAs and create the dependent variable
 rand_df <- na.omit(subset(rand_df, date > "1995-12-31"))
@@ -272,7 +278,8 @@ rf_grid_search <- train(
 )
 print(rf_grid_search)
 
-# Random forest, first attempt -----------------------------------------------------------
+# Random forest -----------------------------------------------------------
+
 # Training set
 train <- sample(1:nrow(df), nrow(df) / 2)
 
@@ -294,7 +301,6 @@ print(rf)
 # Classification
 yhat.rf <- predict(rf , newdata = df[-train, ])
 table(yhat.rf, df$returns_greater_than_market[-train])
-
 # Top 10 stock prediction ---------------------------------------------------
 df <- df %>%
   group_by(date) %>%  # Group by date
@@ -325,8 +331,6 @@ new_threshold <- 0.5
 yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_3_thresholded, df_test$top_10)
 
-
-# Modify the threshold 
 predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
 new_threshold <- 0.5
 yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
