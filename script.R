@@ -4,10 +4,8 @@ library(tidyquant)
 library(tidyr)
 library(rvest)
 library(dplyr)
-library(fastDummies) # For creating dummies
+library(fastDummies) 
 library(randomForest)
-library(caret) # For hyperparameter optimization
-
 
 # Data cleaning -----------------------------------------------------------
 
@@ -43,20 +41,7 @@ stocks <- data.frame(ValueColumn = unique(df$symbol))
 
 rm(url, html_content, start_date, end_date, top100_symbols)
 
-# Write to csv
 write.csv(df, file = "raw_data.csv", row.names = F)
-
-
-# Market returns ----------------------------------------------------------
-
-df <- df %>% 
-  group_by(date) %>% 
-  mutate(market_return = mean(returns), .after = returns)
-
-df <- df %>% 
-  mutate(returns_greater_than_market = case_when(returns > market_return ~ 1, 
-                                                 T ~ 0), .after = market_return)
-
 
 # Lagged returns ----------------------------------------------------------
 
@@ -87,9 +72,15 @@ na_rows <- apply(is.na(df), 1, any)
 df_na <- df[na_rows,]
 df <- na.omit(subset(df, date > "1995-12-31"))
 
+# Market returns ----------------------------------------------------------
 
-# Dummies for other variables ---------------------------------------------
+df <- df %>% 
+  group_by(date) %>% 
+  mutate(market_return = mean(returns), .after = returns)
 
+df <- df %>% 
+  mutate(returns_greater_than_market = case_when(returns > market_return ~ 1, 
+                                                 T ~ 0), .after = market_return)
 # Day of the week
 df <- df %>% 
   mutate(weekday = wday(date, label = T, abbr = F), .after = date)
@@ -102,11 +93,6 @@ df <- dummy_cols(df, select_columns = "month")
 
 # Stock dummies
 df <- dummy_cols(df, select_columns = "symbol")
-predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
-new_threshold <- 0.5
-yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_3_thresholded, df_test$top_10)
-
 
 # Random forest -----------------------------------------------------------
 
@@ -132,8 +118,7 @@ print(rf)
 yhat.rf <- predict(rf , newdata = df[-train, ])
 table(yhat.rf, df$returns_greater_than_market[-train])
 
-
-# Using 1997-1999 as training set -----------------------------------------
+# Using 1997-1999 as training set -----------------------------------------------
 
 start_date <- as.Date("1997-01-01")
 end_date <- as.Date("1999-12-31")
@@ -154,7 +139,6 @@ print(rf_2)
 df_test <- df[df$date > end_date, ]
 yhat.rf_2 <- predict(rf_2 , newdata = df_test)
 table(yhat.rf_2, df_2$returns_greater_than_market)
-print(new_way_table)
 
 # Modify the threshold (we want more true positives than true negatives)
 predicted_probabilities <- predict(rf_2, newdata = df_test, type = "prob")[, 2]
@@ -162,8 +146,26 @@ new_threshold <- 0.6
 yhat.rf_2_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_2_thresholded, df_test$returns_greater_than_market)
 
+# Random Forest with extra variables ----------------------------------------
 
-# Randomized information --------------------------------------------------
+variable_names <- names(df)[8:147]
+formula_str <- paste("returns_greater_than_market ~", paste(variable_names, collapse = " + "))
+formula <- as.formula(formula_str)
+rf_dummies <- randomForest(formula, 
+                           data = train_period, 
+                           ntree = 500, 
+                           nodesize = min_samples,
+                           na.action = na.omit, 
+                           importance = TRUE)
+
+summary(rf_dummies)
+varImpPlot(rf_dummies) 
+print(rf_dummies)
+
+yhat.rf_dummies <- predict(rf_dummies, newdata = df_test)
+table(yhat.rf_dummies, df_test$returns_greater_than_market)
+
+# Randomized information ---------------------------------------------------
 
 # We randomized the results variable
 num_rows <- nrow(rand_df)
@@ -208,7 +210,7 @@ rf_rand <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 
                         na.action = na.omit, importance = T)
 
 summary(rf_rand)
-varImpPlot(rf_rand) 
+
 print(rf_rand)
 
 # Classification
@@ -216,9 +218,9 @@ df_test_rand <- rand_df[rand_df$date > end_date, ]
 yhat.rf_rand <- predict(rf_rand, newdata = df_test_rand)
 table(yhat.rf_rand, df_test_rand$returns_greater_than_market)
 
-
-# Hyperparameter optimization ---------------------------------------------
-
+# Hyperparameter optimization -----------------------------------------------
+install.packages("caret")
+library(caret)
 train_control <- trainControl(method = "cv", 
                               number = 5,
                               verboseIter = TRUE,
@@ -243,8 +245,7 @@ rf_grid_search <- train(
 )
 print(rf_grid_search)
 
-
-# Top 10 stock prediction -------------------------------------------------
+# Top 10 stock prediction ---------------------------------------------------
 df <- df %>%
   group_by(date) %>%  # Group by date
   arrange(desc(returns)) %>%  # Arrange the data in descending order of returns within each date
@@ -272,4 +273,4 @@ table(yhat.rf_3, df_test$returns_greater_than_market)
 predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
 new_threshold <- 0.5
 yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_3_thresholded, df_test$top_10)
+table(yhat.rf_3_thresholded, df_test$top_10)
