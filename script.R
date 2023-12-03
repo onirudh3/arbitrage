@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 
-=======
-rm(list=ls())
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 # Libraries ---------------------------------------------------------------
 
 library(tidyquant)
@@ -36,11 +32,7 @@ top50_symbols <- sub("\n", "", top50_symbols)
 
 # Define the time period yyyy-mm-dd
 start_date <- "1995-01-01"
-<<<<<<< HEAD
 end_date <- "2015-12-31"
-=======
-end_date <- "2000-12-31"
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 
 # Download historical data for the top 50 symbols
 df <- tq_get(top50_symbols, from = start_date, to = end_date, 
@@ -104,12 +96,8 @@ df <- dummy_cols(df, select_columns = "month")
 # Stock dummies
 df <- dummy_cols(df, select_columns = "symbol")
 
-<<<<<<< HEAD
 
 # Define 1997-1999 data as training set -----------------------------------
-=======
-# Using 1997-1999 as training set -----------------------------------------------
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 
 start_date <- as.Date("1997-01-01")
 end_date <- as.Date("1999-12-31")
@@ -125,39 +113,22 @@ df_test <- df[df$date > end_date & df$date <= as.Date("2005-01-01"), ]
 ## 1. Random forest with lagged returns ----
 
 set.seed(1435289)
-<<<<<<< HEAD
 min_samples <- ceiling(0.0005 * nrow(train_period)) # Criteria used in paper
 rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
                      lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
                    data = train_period, ntree = 500, nodesize = min_samples,
                    na.action = na.omit, importance = T)
-=======
-min_samples <- ceiling(0.0005 * nrow(train_period))
-train_period$returns_greater_than_market <- as.factor(train_period$returns_greater_than_market)
-rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
-                       lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                     data = train_period, ntree = 500, nodesize = min_samples,
-                     na.action = na.omit, importance = T)
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 summary(rf)
 varImpPlot(rf) 
 print(rf)
 
 # Classification
-<<<<<<< HEAD
-=======
-df_test <- df[df$date > end_date, ]
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 yhat.rf <- predict(rf, newdata = df_test)
 table(yhat.rf, df_test$returns_greater_than_market)
 
 # Modify the threshold (we want more true positives than true negatives)
 predicted_probabilities <- predict(rf, newdata = df_test, type = "prob")[, 2]
-<<<<<<< HEAD
 new_threshold <- 0.66
-=======
-new_threshold <- 0.64
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 yhat.rf_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_thresholded, df_test$returns_greater_than_market)
 
@@ -166,7 +137,6 @@ x <- table(yhat.rf_thresholded, df_test$returns_greater_than_market)
 x[1, 1] / x[1, 2] # For negatives
 x[2, 2] / x[2, 1] # For positives
 
-<<<<<<< HEAD
 
 ## 2. Random Forest with all variables ----
 
@@ -179,23 +149,6 @@ rf_dummies <- randomForest(formula,
                            nodesize = min_samples,
                            na.action = na.omit, 
                            importance = TRUE)
-=======
-# Reduce sample to solve computational limitations
-start_date <- as.Date("1997-01-01")
-end_date <- as.Date("1997-12-31")
-limit_date <- as.Date("2000-01-01")
-train_period <- df[df$date >= start_date & df$date <= end_date, ]
-df_test <- df[df$date > end_date & df$date < limit_date, ]
-variable_names <- names(df)[8:136]
-formula_str <- paste("returns_greater_than_market ~", paste(variable_names, collapse = " + "))
-formula <- as.formula(formula_str)
-rf_dummies <- randomForest(formula, 
-             data = train_period, 
-             ntree = 200, 
-             nodesize = min_samples,
-             na.action = na.omit, 
-             importance = TRUE)
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 
 summary(rf_dummies)
 varImpPlot(rf_dummies) 
@@ -203,55 +156,6 @@ print(rf_dummies)
 
 yhat.rf_dummies <- predict(rf_dummies, newdata = df_test)
 table(yhat.rf_dummies, df_test$returns_greater_than_market)
-predicted_probabilities <- predict(rf_dummies, newdata = df_test, type = "prob")[, 2]
-new_threshold <- 0.6
-yhat.rf_dummies_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_dummies_thresholded, df_test$returns_greater_than_market)
-
-# RF with lagged returns and time dummies 
-variable_names <- names(df)[8:37]
-formula_str <- paste("returns_greater_than_market ~", paste(variable_names, collapse = " + "))
-formula <- as.formula(formula_str)
-rf_time_dummies <- randomForest(formula, 
-                           data = train_period, 
-                           ntree = 200, 
-                           nodesize = min_samples,
-                           na.action = na.omit, 
-                           importance = TRUE)
-
-summary(rf_time_dummies)
-varImpPlot(rf_time_dummies) 
-print(rf_time_dummies)
-
-# Classification
-yhat.rf_time_dummies <- predict(rf_time_dummies, newdata = df_test)
-table(yhat.rf_time_dummies, df_test$returns_greater_than_market)
-predicted_probabilities <- predict(rf_time_dummies, newdata = df_test, type = "prob")[, 2]
-new_threshold <- 0.6
-yhat.rf_time_dummies_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_time_dummies_thresholded, df_test$returns_greater_than_market)
-
-# RF with lagged returns and stock id dummies
-variable_names <- names(df)[c(8:18, 38:136)]
-formula_str <- paste("returns_greater_than_market ~", paste(variable_names, collapse = " + "))
-formula <- as.formula(formula_str)
-rf_id_dummies <- randomForest(formula, 
-                           data = train_period, 
-                           ntree = 200, 
-                           nodesize = min_samples,
-                           na.action = na.omit, 
-                           importance = TRUE)
-
-summary(rf_id_dummies)
-varImpPlot(rf_id_dummies) 
-print(rf_id_dummies)
-
-yhat.rf_id_dummies <- predict(rf_id_dummies, newdata = df_test)
-table(yhat.rf_id_dummies, df_test$returns_greater_than_market)
-predicted_probabilities <- predict(rf_id_dummies, newdata = df_test, type = "prob")[, 2]
-new_threshold <- 0.6
-yhat.rf_id_dummies_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_id_dummies_thresholded, df_test$returns_greater_than_market)
 
 # Modified threshold
 predicted_probabilities <- predict(rf_dummies, newdata = df_test, type = "prob")[, 2]
@@ -376,10 +280,6 @@ rf_rand <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 
                         data = train_period_rand, ntree = 500, nodesize = min_samples,
                         na.action = na.omit, importance = T)
 summary(rf_rand)
-<<<<<<< HEAD
-=======
-  
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 print(rf_rand)
 
 # Classification
@@ -393,16 +293,7 @@ table(yhat.rf_rand, df_test_rand$returns_greater_than_market)
 train_control <- trainControl(method = "cv", 
                               number = 5,
                               verboseIter = TRUE,
-<<<<<<< HEAD
                               search = "grid")
-=======
-                              search = "grid"
-)
-hyper_grid <- expand.grid(
-  mtry = c(2, floor(sqrt(ncol(train_period))), 
-           floor(ncol(train_period)/2))
-  )
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
 
 hyper_grid <- expand.grid(mtry = c(2, floor(sqrt(ncol(train_period))), 
                                    floor(ncol(train_period) / 2)))
@@ -420,64 +311,3 @@ rf_grid_search <- train(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 
                         ntree = 500)
 
 print(rf_grid_search)
-<<<<<<< HEAD
-=======
-
-# Random forest -----------------------------------------------------------
-
-# Training set
-train <- sample(1:nrow(df), nrow(df) / 2)
-
-# Make returns_greater_than_market binary 
-df$returns_greater_than_market <- as.factor(df$returns_greater_than_market)
-
-# Random forest
-set.seed(1435289)
-min_samples <- ceiling(0.0005 * length(train))
-
-rf <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
-                     lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                   data = df, ntree = 500, nodesize = min_samples, subset = train,
-                   na.action = na.omit, importance = T)
-summary(rf)
-varImpPlot(rf)
-print(rf)
-
-# Classification
-yhat.rf <- predict(rf , newdata = df[-train, ])
-table(yhat.rf, df$returns_greater_than_market[-train])
-# Top 10 stock prediction ---------------------------------------------------
-df <- df %>%
-  group_by(date) %>%  # Group by date
-  arrange(desc(returns)) %>%  # Arrange the data in descending order of returns within each date
-  mutate(rank = row_number(),  # Assign ranks based on order
-         top_10 = as.integer(rank <= 10)) %>%  # Create binary variable for top 10
-  ungroup()
-
-# Create the RF
-set.seed(1435289)
-train_period$top_10 <- as.factor(train_period$top_10)
-rf_3 <- randomForest(top_10 ~ lr_1 + lr_2 + lr_3 + lr_4 + 
-                       lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                     data = train_period, ntree = 500,
-                     na.action = na.omit, importance = T)
-summary(rf_3)
-varImpPlot(rf_3) 
-print(rf_3)
-
-# Classification
-df_test <- df[df$date > end_date, ]
-yhat.rf_3 <- predict(rf_3 , newdata = df_test)
-table(yhat.rf_3, df_test$returns_greater_than_market)
-
-# Modify the threshold 
-predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
-new_threshold <- 0.5
-yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_3_thresholded, df_test$top_10)
-
-predicted_probabilities <- predict(rf_3, newdata = df_test, type = "prob")[ ,2]
-new_threshold <- 0.5
-yhat.rf_3_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
-table(yhat.rf_3_thresholded, df_test$top_10)
->>>>>>> 4a4a987b35780f17fdf5cc623bed12bc85a85a16
