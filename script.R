@@ -311,3 +311,81 @@ rf_grid_search <- train(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 
                         ntree = 500)
 
 print(rf_grid_search)
+
+# Computing some profits -----------------------------------------------------
+
+# Get the returns
+df_test$predicted_probability <- predicted_probabilities
+relevant_data <- df_test[, c("symbol", "date", "predicted_probability", "returns")]
+sorted_data <- relevant_data %>%
+  group_by(date) %>%
+  arrange(date, desc(predicted_probability))
+top_bottom_stocks <- sorted_data %>%
+  group_by(date) %>%
+  summarise(
+    top_5_symbols = list(head(symbol, 5)),
+    bottom_5_symbols = list(tail(symbol, 5)),
+    .groups = 'drop'
+  )
+
+df_test_selected <- df_test[, c("symbol", "date", "returns")]
+
+# Expanding top 5 symbols
+top_stocks_expanded <- top_bottom_stocks %>%
+  select(date, top_5_symbols) %>%
+  unnest(cols = top_5_symbols) %>%
+  rename(symbol = top_5_symbols)
+
+# Expanding bottom 5 symbols
+bottom_stocks_expanded <- top_bottom_stocks %>%
+  select(date, bottom_5_symbols) %>%
+  unnest(cols = bottom_5_symbols) %>%
+  rename(symbol = bottom_5_symbols)
+
+top_stocks_expanded$type <- "Top 5"
+bottom_stocks_expanded$type <- "Bottom 5"
+expanded_stocks <- rbind(top_stocks_expanded, bottom_stocks_expanded)
+
+# Join for top 5 stocks
+top_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Top 5") %>%
+  select(date, symbol) %>%
+  left_join(df_test_selected, by = c("date", "symbol"))
+
+# Join for bottom 5 stocks
+bottom_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Bottom 5") %>%
+  select(date, symbol) %>%
+  left_join(df_test_selected, by = c("date", "symbol"))
+
+# Get the daily average returns
+average_daily_returns_top <- top_stocks_with_returns %>%
+  group_by(date) %>%
+  summarise(average_returns = mean(returns, na.rm = TRUE))
+average_daily_returns_flop <- bottom_stocks_with_returns %>%
+  group_by(date) %>%
+  summarise(average_returns = mean(returns, na.rm = TRUE))
+
+# Flop are short-traded, meaning we need to change the sign
+average_daily_returns_flop$average_returns <- -1 * average_daily_returns_flop$average_returns
+
+# Now let's combine short and long portfolio returns
+total_returns <- left_join(average_daily_returns_top, average_daily_returns_flop, by = "date", suffix = c("_top", "_flop"))
+total_returns <- total_returns %>%
+  mutate(total_average_returns = average_returns_top + average_returns_flop) %>%
+  select(date, total_average_returns)
+sum(total_returns$total_average_returns, na.rm = TRUE)
+(total_returns$total_average_returns)
+
+library(lubridate)
+
+total_returns$date <- as.Date(total_returns$date)
+
+# Extract the year from the date and create a new column for it
+combined_data <- combined_data %>%
+  mutate(year = year(date))
+
+# Sum total_average_returns for each year
+annual_sums <- combined_data %>%
+  group_by(year) %>%
+  summarise(annual_sum = sum(total_average_returns, na.rm = TRUE))
