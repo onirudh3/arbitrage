@@ -1,4 +1,3 @@
-
 # Libraries ---------------------------------------------------------------
 
 library(tidyquant)
@@ -8,7 +7,7 @@ library(dplyr)
 library(fastDummies) # Create dummy variables
 library(randomForest)
 library(caret) # For hyperparameter optimization
-
+library(lubridate) # For annual returns
 
 # Data cleaning -----------------------------------------------------------
 
@@ -96,7 +95,6 @@ df <- dummy_cols(df, select_columns = "month")
 # Stock dummies
 df <- dummy_cols(df, select_columns = "symbol")
 
-
 # Define 1997-1999 data as training set -----------------------------------
 
 start_date <- as.Date("1997-01-01")
@@ -108,7 +106,6 @@ train_period$returns_greater_than_market <- as.factor(train_period$returns_great
 # Analysis in period 2000-2005  -------------------------------------------
 
 df_test <- df[df$date > end_date & df$date <= as.Date("2005-01-01"), ]
-
 
 ## 1. Random forest with lagged returns ----
 
@@ -138,6 +135,87 @@ x[1, 1] / x[1, 2] # For negatives
 x[2, 2] / x[2, 1] # For positives
 
 
+# Computing the profits
+
+# Get the returns
+df_test$predicted_probability <- predicted_probabilities
+relevant_data <- df_test[, c("symbol", "date", "predicted_probability", "returns")]
+sorted_data <- relevant_data %>%
+  group_by(date) %>%
+  arrange(date, desc(predicted_probability))
+top_flop_stocks <- sorted_data %>%
+  group_by(date) %>%
+  summarise(
+    top_5_symbols = list(head(symbol, 5)),
+    flop_5_symbols = list(tail(symbol, 5)),
+    .groups = 'drop'
+  )
+
+df_test_selected <- df_test[, c("symbol", "date", "returns")]
+
+# Expanding top 5 symbols
+top_stocks_expanded <- top_flop_stocks %>%
+  select(date, top_5_symbols) %>%
+  unnest(cols = top_5_symbols) %>%
+  rename(symbol = top_5_symbols)
+
+# Expanding bottom 5 symbols
+flop_stocks_expanded <- top_flop_stocks %>%
+  select(date, flop_5_symbols) %>%
+  unnest(cols = flop_5_symbols) %>%
+  rename(symbol = flop_5_symbols)
+
+top_stocks_expanded$type <- "Top 5"
+flop_stocks_expanded$type <- "Flop 5"
+expanded_stocks <- rbind(top_stocks_expanded, flop_stocks_expanded)
+
+# Join for top 5 stocks
+top_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Top 5") %>%
+  select(date, symbol) %>%
+  left_join(df_test_selected, by = c("date", "symbol"))
+
+# Join for bottom 5 stocks
+flop_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Flop 5") %>%
+  select(date, symbol) %>%
+  left_join(df_test_selected, by = c("date", "symbol"))
+
+# Get the daily average returns
+average_daily_returns_top <- top_stocks_with_returns %>%
+  group_by(date) %>%
+  summarise(average_returns = mean(returns, na.rm = TRUE))
+average_daily_returns_flop <- flop_stocks_with_returns %>%
+  group_by(date) %>%
+  summarise(average_returns = mean(returns, na.rm = TRUE))
+
+# Flop are short-traded, meaning we need to change the sign
+average_daily_returns_flop$average_returns <- -1 * average_daily_returns_flop$average_returns
+
+# Now let's combine short and long portfolio returns
+total_returns <- left_join(average_daily_returns_top, average_daily_returns_flop, by = "date", suffix = c("_top", "_flop"))
+total_returns <- total_returns %>%
+  mutate(total_average_returns = average_returns_top + average_returns_flop) %>%
+  select(date, total_average_returns)
+sum(total_returns$total_average_returns, na.rm = TRUE)
+
+total_returns$date <- as.Date(total_returns$date)
+
+# Extract the year from the date and create a new column for it
+total_returns <- total_returns %>%
+  mutate(year = year(date))
+
+# Sum total_average_returns for each year
+annual_returns <- total_returns %>%
+  group_by(year) %>%
+  summarise(percentage_return = sum(total_average_returns, na.rm = TRUE))
+
+rm(top_flop_stocks, top_stocks_expanded, expanded_stocks,
+   average_daily_returns_flop, average_daily_returns_top,
+   flop_stocks_expanded, top_stocks_with_returns, 
+   flop_stocks_with_returns, sorted_data, 
+   relevant_data, df_test_selected)
+
 ## 2. Random Forest with all variables ----
 
 variable_names <- names(df)[8:87]
@@ -163,6 +241,10 @@ new_threshold <- 0.6
 yhat.rf_dummies_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_dummies_thresholded, df_test$returns_greater_than_market)
 
+# True/False ratios
+x <- table(yhat.rf_thresholded, df_test$returns_greater_than_market)
+x[1, 1] / x[1, 2] # For negatives
+x[2, 2] / x[2, 1] # For positives
 
 ## 3. RF with lagged returns and time dummies ----
 
@@ -188,6 +270,10 @@ new_threshold <- 0.6
 yhat.rf_time_dummies_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_time_dummies_thresholded, df_test$returns_greater_than_market)
 
+# True/False ratios
+x <- table(yhat.rf_thresholded, df_test$returns_greater_than_market)
+x[1, 1] / x[1, 2] # For negatives
+x[2, 2] / x[2, 1] # For positives
 
 ## 4. RF with lagged returns and stock id dummies ----
 
@@ -212,6 +298,10 @@ new_threshold <- 0.6
 yhat.rf_id_dummies_thresholded <- ifelse(predicted_probabilities > new_threshold, 1, 0)
 table(yhat.rf_id_dummies_thresholded, df_test$returns_greater_than_market)
 
+# True/False ratios
+x <- table(yhat.rf_thresholded, df_test$returns_greater_than_market)
+x[1, 1] / x[1, 2] # For negatives
+x[2, 2] / x[2, 1] # For positives
 
 # Analysis in period 2010-2015  -------------------------------------------
 
@@ -235,6 +325,86 @@ x <- table(yhat.rf_thresholded, df_test$returns_greater_than_market)
 x[1, 1] / x[1, 2] # For negatives
 x[2, 2] / x[2, 1] # For positives
 
+# Computing the profits
+
+# Get the returns
+df_test$predicted_probability <- predicted_probabilities
+relevant_data <- df_test[, c("symbol", "date", "predicted_probability", "returns")]
+sorted_data <- relevant_data %>%
+  group_by(date) %>%
+  arrange(date, desc(predicted_probability))
+top_flop_stocks <- sorted_data %>%
+  group_by(date) %>%
+  summarise(
+    top_5_symbols = list(head(symbol, 5)),
+    flop_5_symbols = list(tail(symbol, 5)),
+    .groups = 'drop'
+  )
+
+df_test_selected <- df_test[, c("symbol", "date", "returns")]
+
+# Expanding top 5 symbols
+top_stocks_expanded <- top_flop_stocks %>%
+  select(date, top_5_symbols) %>%
+  unnest(cols = top_5_symbols) %>%
+  rename(symbol = top_5_symbols)
+
+# Expanding bottom 5 symbols
+flop_stocks_expanded <- top_flop_stocks %>%
+  select(date, flop_5_symbols) %>%
+  unnest(cols = flop_5_symbols) %>%
+  rename(symbol = flop_5_symbols)
+
+top_stocks_expanded$type <- "Top 5"
+flop_stocks_expanded$type <- "Flop 5"
+expanded_stocks <- rbind(top_stocks_expanded, flop_stocks_expanded)
+
+# Join for top 5 stocks
+top_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Top 5") %>%
+  select(date, symbol) %>%
+  left_join(df_test_selected, by = c("date", "symbol"))
+
+# Join for bottom 5 stocks
+flop_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Flop 5") %>%
+  select(date, symbol) %>%
+  left_join(df_test_selected, by = c("date", "symbol"))
+
+# Get the daily average returns
+average_daily_returns_top <- top_stocks_with_returns %>%
+  group_by(date) %>%
+  summarise(average_returns = mean(returns, na.rm = TRUE))
+average_daily_returns_flop <- flop_stocks_with_returns %>%
+  group_by(date) %>%
+  summarise(average_returns = mean(returns, na.rm = TRUE))
+
+# Flop are short-traded, meaning we need to change the sign
+average_daily_returns_flop$average_returns <- -1 * average_daily_returns_flop$average_returns
+
+# Now let's combine short and long portfolio returns
+total_returns_2010 <- left_join(average_daily_returns_top, average_daily_returns_flop, by = "date", suffix = c("_top", "_flop"))
+total_returns_2010 <- total_returns_2010 %>%
+  mutate(total_average_returns = average_returns_top + average_returns_flop) %>%
+  select(date, total_average_returns)
+sum(total_returns$total_average_returns, na.rm = TRUE)
+
+total_returns$date <- as.Date(total_returns$date)
+
+# Extract the year from the date and create a new column for it
+total_returns <- total_returns %>%
+  mutate(year = year(date))
+
+# Sum total_average_returns for each year
+annual_returns_2010 <- total_returns %>%
+  group_by(year) %>%
+  summarise(percentage_return = sum(total_average_returns, na.rm = TRUE))
+
+rm(top_flop_stocks, top_stocks_expanded, expanded_stocks,
+   average_daily_returns_flop, average_daily_returns_top,
+   flop_stocks_expanded, top_stocks_with_returns, 
+   flop_stocks_with_returns,
+   sorted_data, relevant_data, df_test_selected)
 
 # Randomized information --------------------------------------------------
 
@@ -258,10 +428,6 @@ rand_df <- rand_df %>%
          lr_126 = lag(returns, n = 126),
          lr_252 = lag(returns, n = 252), .by = symbol)
 
-# Just a small check on NAs
-na_rows_2 <- apply(is.na(df), 1, any)
-rand_df_na <- df[na_rows_2, ]
-
 # We delete NAs and create the dependent variable
 rand_df <- na.omit(subset(rand_df, date > "1995-12-31"))
 rand_df <- rand_df %>% 
@@ -281,70 +447,50 @@ rf_rand <- randomForest(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 
                         na.action = na.omit, importance = T)
 summary(rf_rand)
 print(rf_rand)
+varImpPlot(rf_rand)
 
 # Classification
-df_test_rand <- rand_df[rand_df$date > end_date, ]
+df_test_rand <- rand_df[rand_df$date > end_date & rand_df$date <= as.Date("2005-01-01"), ]
 yhat.rf_rand <- predict(rf_rand, newdata = df_test_rand)
 table(yhat.rf_rand, df_test_rand$returns_greater_than_market)
+predicted_probabilities <- predict(rf_rand, newdata = df_test_rand, type = "prob")[, 2]
 
-
-# Hyperparameter optimization ---------------------------------------------
-
-train_control <- trainControl(method = "cv", 
-                              number = 5,
-                              verboseIter = TRUE,
-                              search = "grid")
-
-hyper_grid <- expand.grid(mtry = c(2, floor(sqrt(ncol(train_period))), 
-                                   floor(ncol(train_period) / 2)))
-
-# RF with lagged returns
-set.seed(1435289)
-rf_grid_search <- train(returns_greater_than_market ~ lr_1 + lr_2 + lr_3 + lr_4 + 
-                          lr_5 + lr_10 + lr_21 + lr_42 + lr_63 + lr_126 + lr_252,
-                        data = train_period,
-                        method = "rf", 
-                        metric = "Accuracy",
-                        trControl = train_control, 
-                        tuneGrid = hyper_grid,
-                        na.action = na.omit,
-                        ntree = 500)
-
-print(rf_grid_search)
-
-# Computing some profits -----------------------------------------------------
+# True/False ratios
+x <- table(yhat.rf_rand, df_test_rand$returns_greater_than_market)
+x[1, 1] / x[1, 2] # For negatives
+x[2, 2] / x[2, 1] # For positives
 
 # Get the returns
-df_test$predicted_probability <- predicted_probabilities
-relevant_data <- df_test[, c("symbol", "date", "predicted_probability", "returns")]
+df_test_rand$predicted_probability <- predicted_probabilities
+relevant_data <- df_test_rand[, c("symbol", "date", "predicted_probability", "returns")]
 sorted_data <- relevant_data %>%
   group_by(date) %>%
   arrange(date, desc(predicted_probability))
-top_bottom_stocks <- sorted_data %>%
+top_flop_stocks <- sorted_data %>%
   group_by(date) %>%
   summarise(
     top_5_symbols = list(head(symbol, 5)),
-    bottom_5_symbols = list(tail(symbol, 5)),
+    flop_5_symbols = list(tail(symbol, 5)),
     .groups = 'drop'
   )
 
-df_test_selected <- df_test[, c("symbol", "date", "returns")]
+df_test_selected <- df_test_rand[, c("symbol", "date", "returns")]
 
 # Expanding top 5 symbols
-top_stocks_expanded <- top_bottom_stocks %>%
+top_stocks_expanded <- top_flop_stocks %>%
   select(date, top_5_symbols) %>%
   unnest(cols = top_5_symbols) %>%
   rename(symbol = top_5_symbols)
 
 # Expanding bottom 5 symbols
-bottom_stocks_expanded <- top_bottom_stocks %>%
-  select(date, bottom_5_symbols) %>%
-  unnest(cols = bottom_5_symbols) %>%
-  rename(symbol = bottom_5_symbols)
+flop_stocks_expanded <- top_flop_stocks %>%
+  select(date, flop_5_symbols) %>%
+  unnest(cols = flop_5_symbols) %>%
+  rename(symbol = flop_5_symbols)
 
 top_stocks_expanded$type <- "Top 5"
-bottom_stocks_expanded$type <- "Bottom 5"
-expanded_stocks <- rbind(top_stocks_expanded, bottom_stocks_expanded)
+flop_stocks_expanded$type <- "Flop 5"
+expanded_stocks <- rbind(top_stocks_expanded, flop_stocks_expanded)
 
 # Join for top 5 stocks
 top_stocks_with_returns <- expanded_stocks %>%
@@ -353,8 +499,8 @@ top_stocks_with_returns <- expanded_stocks %>%
   left_join(df_test_selected, by = c("date", "symbol"))
 
 # Join for bottom 5 stocks
-bottom_stocks_with_returns <- expanded_stocks %>%
-  filter(type == "Bottom 5") %>%
+flop_stocks_with_returns <- expanded_stocks %>%
+  filter(type == "Flop 5") %>%
   select(date, symbol) %>%
   left_join(df_test_selected, by = c("date", "symbol"))
 
@@ -362,7 +508,7 @@ bottom_stocks_with_returns <- expanded_stocks %>%
 average_daily_returns_top <- top_stocks_with_returns %>%
   group_by(date) %>%
   summarise(average_returns = mean(returns, na.rm = TRUE))
-average_daily_returns_flop <- bottom_stocks_with_returns %>%
+average_daily_returns_flop <- flop_stocks_with_returns %>%
   group_by(date) %>%
   summarise(average_returns = mean(returns, na.rm = TRUE))
 
@@ -374,16 +520,22 @@ total_returns <- left_join(average_daily_returns_top, average_daily_returns_flop
 total_returns <- total_returns %>%
   mutate(total_average_returns = average_returns_top + average_returns_flop) %>%
   select(date, total_average_returns)
-sum(total_returns$total_average_returns, na.rm = TRUE)
-(total_returns$total_average_returns)
-
-library(lubridate)
-
 total_returns$date <- as.Date(total_returns$date)
 
 # Extract the year from the date and create a new column for it
-combined_data <- combined_data %>%
+total_returns <- total_returns %>%
   mutate(year = year(date))
+
+# Sum total_average_returns for each year
+annual_returns_rand <- total_returns %>%
+  group_by(year) %>%
+  summarise(annual_sum = sum(total_average_returns, na.rm = TRUE))
+
+rm(top_flop_stocks, top_stocks_expanded, expanded_stocks,
+   average_daily_returns_flop, average_daily_returns_top,
+   flop_stocks_expanded, top_stocks_with_returns, 
+   flop_stocks_with_returns, total_returns,
+   sorted_data, relevant_data, df_test_selected)
 
 # Sum total_average_returns for each year
 annual_sums <- combined_data %>%
