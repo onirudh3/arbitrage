@@ -6,7 +6,6 @@ library(rvest)
 library(dplyr)
 library(fastDummies) # Create dummy variables
 library(randomForest)
-library(caret) # For hyperparameter optimization
 library(lubridate) # For annual returns
 
 # Data cleaning -----------------------------------------------------------
